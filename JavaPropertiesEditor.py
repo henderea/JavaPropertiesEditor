@@ -12,6 +12,8 @@ else:
 	NONE_COMMAND = ('', None, 0)
 	MAP = list(map(chr, list(range(0x7f))))
 
+REVERT_COMMAND = ('revert', None, 1)
+
 class UpperTable(dict):
 	def __missing__(self, key):
 		return u'\\u%04X' % key
@@ -45,16 +47,14 @@ class JavaPropertiesConvertCommand(sublime_plugin.TextCommand):
 
 class JavaPropertiesEditorListener(sublime_plugin.EventListener):
 	def check_properties(self, view):
-		file_name = view.file_name()
-		result = file_name and file_name.endswith('.properties')
-		if result:
-			view.settings().set('is_properties', True)
+		syntax = view.settings().get('syntax')
+		result = syntax and syntax.find('JavaProperties.') >= 0
 		return result
 
 	def replace_content(self, view, contents):
 		view.run_command('java_properties_convert', {'contents': contents})
 
-	def on_load(self, view):
+	def process_file(self, view):
 		if not self.check_properties(view):
 			return
 		regions = sublime.Region(0, view.size())
@@ -66,15 +66,22 @@ class JavaPropertiesEditorListener(sublime_plugin.EventListener):
 			view.settings().set('use_lower', True)
 		self.replace_content(view, contents)
 
+	def on_load(self, view):
+		if not self.check_properties(view):
+			return
+		self.process_file(view)
+
 	def on_modified(self, view):
-		if not view.settings().get('is_properties'):
+		if not self.check_properties(view):
 			return
 		if view.settings().get('set_scratch'):
 			view.settings().erase('set_scratch')
 			return
 		cmd0 = view.command_history(-1)
 		cmd = view.command_history(0)
-		if cmd == NONE_COMMAND:
+		if cmd == REVERT_COMMAND:
+			self.process_file(view)
+		elif cmd == NONE_COMMAND:
 			# no more command, redo it
 			view.run_command('redo')
 		elif cmd0 == NONE_COMMAND:
@@ -97,7 +104,7 @@ class JavaPropertiesEditorListener(sublime_plugin.EventListener):
 		self.replace_content(view, orignal_contents)
 
 	def on_post_save(self, view):
-		if not view.settings().get('is_properties'):
+		if not self.check_properties(view):
 			return
 		if not hasattr(self, 'contents'):
 			return
